@@ -77,7 +77,7 @@ canvas{width:100%;height:220px;display:block;background:#0a0c0f;border-radius:10
 </head>
 <body>
 <header>
-  <h1>Rapid 1.6 TDI · диагностика</h1>
+  <h1>OBD-диагностика <span id="carName" class="muted" style="font-weight:500;font-size:13px"></span></h1>
   <span id="stPill" class="pill">нет связи</span>
 </header>
 
@@ -89,16 +89,10 @@ canvas{width:100%;height:220px;display:block;background:#0a0c0f;border-radius:10
     <h3>Подключение</h3>
     <div id="envBox"></div>
     <div class="row" style="margin-top:10px">
-      <label class="f">Двигатель
-        <select id="cfgEngine">
-          <option value="105">1.6 TDI CR 105 л.с. (CAYC)</option>
-          <option value="90">1.6 TDI CR 90 л.с. (CAYB)</option>
-        </select>
-      </label>
       <label class="f">Протокол
         <select id="cfgProto">
-          <option value="can">CAN 11 бит 500 кбит (Škoda 2013)</option>
-          <option value="auto0">Автопоиск</option>
+          <option value="can">Сначала CAN 500 кбит (VAG), затем автопоиск</option>
+          <option value="auto0">Только автопоиск</option>
         </select>
       </label>
     </div>
@@ -110,8 +104,23 @@ canvas{width:100%;height:220px;display:block;background:#0a0c0f;border-radius:10
     <div id="connMsg" class="hint"></div>
   </div>
 
+  <div class="card">
+    <h3>Профиль автомобиля</h3>
+    <div class="small muted">Определяется автоматически: марка, модель и год — по VIN, тип топлива и объём — по блоку двигателя. Поправьте вручную, только если определилось неверно.</div>
+    <div class="kv" id="profKv" style="margin-top:8px"><span>Автомобиль</span><span>подключите адаптер</span></div>
+    <div class="row" style="margin-top:10px">
+      <label class="f">Топливо
+        <select id="cfgFuel"><option value="auto">Авто</option><option value="diesel">Дизель</option><option value="petrol">Бензин</option></select>
+      </label>
+      <label class="f">Объём, л
+        <select id="cfgDisp"><option value="auto">Авто</option><option>1.0</option><option>1.2</option><option>1.4</option><option>1.5</option><option>1.6</option><option>1.8</option><option>1.9</option><option>2.0</option><option>2.5</option><option>3.0</option></select>
+      </label>
+    </div>
+    <label class="row small" style="margin-top:8px"><input type="checkbox" id="cfgAutoScan"> Автоматически опрашивать все блоки VAG после подключения</label>
+  </div>
+
   <div class="card" id="infoCard" style="display:none">
-    <h3>Автомобиль и адаптер</h3>
+    <h3>Связь</h3>
     <div class="kv" id="infoKv"></div>
   </div>
 
@@ -206,7 +215,7 @@ canvas{width:100%;height:220px;display:block;background:#0a0c0f;border-radius:10
   </div>
   <div class="card small">
     <h3>Ориентиры</h3>
-    <div>Паспортный смешанный расход 1.6 TDI CR 105 л.с. — 4,4 л/100 км, у версии GreenTec — 3,9 л/100 км. Это стендовый цикл NEDC. В реальной езде, особенно зимой, в пробках и короткими поездками, расход обычно выше, а городской всегда больше смешанного. 10 л/100 км в городе и 6,5 на трассе для этого мотора — много. Вкладка «Анализ» поможет найти причину.</div>
+    <div>Паспортный расход в документах на автомобиль измерен на стенде (цикл NEDC или WLTP). В реальной езде, особенно зимой, в пробках и короткими поездками, расход обычно выше, а городской всегда больше смешанного. Сравнивайте свои цифры с паспортными для вашей версии двигателя. Если разница большая, вкладка «Анализ» поможет найти причину.</div>
   </div>
 </section>
 
@@ -304,7 +313,7 @@ canvas{width:100%;height:220px;display:block;background:#0a0c0f;border-radius:10
   </div>
   <div class="card">
     <h3>Замер разгона</h3>
-    <div class="small">Проверка мощности. Слабый разгон вместе с большим расходом указывает на наддув, ДМРВ, EGR или форсунки. Только где это безопасно и разрешено. Паспорт 0–100 км/ч: около 10–12 с в зависимости от версии.</div>
+    <div class="small">Проверка мощности. Слабый разгон вместе с большим расходом указывает на наддув, ДМРВ, EGR или форсунки. Только где это безопасно и разрешено. Сравнивайте с паспортным временем разгона для вашей версии.</div>
     <div class="row" style="margin-top:8px">
       <button class="btn pri sm" id="btnAcc0" disabled>0–100 км/ч</button>
       <button class="btn sm" id="btnAcc60" disabled>60–100 км/ч</button>
@@ -493,8 +502,11 @@ function parseResponse(raw, cmd, opt) {
 // ---------- Таблица параметров OBD (режим 01) ----------
 const PIDS = {
   0x01: { k: 'status', len: 4 },
+  0x03: { k: 'fsys', len: 2, f: b => b[0] },
   0x04: { k: 'load', len: 1, f: b => b[0] * 100 / 255 },
   0x05: { k: 'ect', len: 1, f: b => b[0] - 40 },
+  0x06: { k: 'stft', len: 1, f: b => (b[0] - 128) * 100 / 128 },
+  0x07: { k: 'ltft', len: 1, f: b => (b[0] - 128) * 100 / 128 },
   0x0B: { k: 'map', len: 1, f: b => b[0] },
   0x0C: { k: 'rpm', len: 2, f: b => (b[0] * 256 + b[1]) / 4 },
   0x0D: { k: 'spd', len: 1, f: b => b[0] },
@@ -511,6 +523,7 @@ const PIDS = {
   0x33: { k: 'baro', len: 1, f: b => b[0] },
   0x34: { k: 'lam', len: 4, f: (b, o) => (b[0] * 256 + b[1]) * (o.lambdaMax || 2) / 65536 },
   0x42: { k: 'volt', len: 2, f: b => (b[0] * 256 + b[1]) / 1000 },
+  0x44: { k: 'lamCmd', len: 2, f: b => (b[0] * 256 + b[1]) * 2 / 65536 },
   0x46: { k: 'amb', len: 1, f: b => b[0] - 40 },
   0x49: { k: 'pedal', len: 1, f: b => b[0] * 100 / 255 },
   0x4F: { k: 'maxv', len: 4 },
@@ -565,7 +578,7 @@ const DTC_DESC = {
 function dtcDesc(code) {
   if (DTC_DESC[code]) return DTC_DESC[code];
   if (/^P1|^P3[0-3]|^[CBU][1-3]/.test(code)) return 'Код производителя (VAG). Расшифровка — по коду для вашего блока у дилера или на СТО.';
-  return 'Описание не найдено — ищите по коду для 1.6 TDI CR.';
+  return 'Описание не найдено — ищите по коду для вашего двигателя.';
 }
 const UDS_ST = [[0, 'активна сейчас', 'r'], [2, 'предварительная', 'y'], [3, 'подтверждена', 'y'], [7, 'включает лампу', 'r']];
 const NRC = { 0x10: 'общий отказ', 0x11: 'сервис не поддерживается', 0x12: 'подфункция не поддерживается', 0x13: 'неверная длина', 0x22: 'условия не выполнены', 0x31: 'вне диапазона (нет такого параметра)', 0x33: 'нужен защищённый доступ', 0x78: 'ожидание ответа', 0x7F: 'недоступно в этой сессии' };
@@ -583,7 +596,7 @@ const MODULES = [
   { addr: '19', name: 'Шлюз (Gateway)', req: '710', resp: '77A' },
   { addr: '44', name: 'Усилитель руля', req: '712', resp: '77C' }
 ];
-const IDENT_DIDS = [[0xF187, 'Номер детали'], [0xF189, 'Версия ПО'], [0xF191, 'Номер аппаратной части'], [0xF1A3, 'Версия аппаратной части'], [0xF197, 'Обозначение системы'], [0xF18C, 'Серийный номер'], [0x0600, 'Кодирование']];
+const IDENT_DIDS = [[0xF187, 'Номер детали'], [0xF189, 'Версия ПО'], [0xF191, 'Номер аппаратной части'], [0xF1A3, 'Версия аппаратной части'], [0xF197, 'Обозначение системы'], [0xF1AD, 'Код двигателя'], [0xF18C, 'Серийный номер'], [0x0600, 'Кодирование']];
 const DID_NAMES = Object.fromEntries(IDENT_DIDS.map(([d, n]) => [hex4(d), n]).concat([['F190', 'VIN'], ['F19E', 'Набор данных (ASAM)'], ['F1A2', 'Версия набора данных']]));
 
 // ---------- Безопасность терминала: только чтение ----------
@@ -683,7 +696,15 @@ class Obd {
     }
     return out;
   }
-  async clearObd() { const r = await this.request('04', 6000); return !!(r.bytes && r.bytes[0] === 0x44); }
+  // Длинный таймаут адаптера на время стирания: блок может ответить «подождите» (7F xx 78) и подтвердить позже
+  async slow(on) { const e = this.elm; if (on) { await e.cmd('ATAT0'); await e.cmd('ATSTFF'); } else { await e.cmd('ATST32'); await e.cmd('ATAT1'); } }
+  async clearObd() {
+    let r = await this.request('04', 9000);
+    if (r.bytes && r.bytes[0] === 0x7F && r.bytes[2] === 0x78) { await sleep(2500); return { ok: null, nrc: 0x78 }; }
+    if (r.bytes && r.bytes[0] === 0x44) return { ok: true };
+    if (r.bytes && r.bytes[0] === 0x7F) return { ok: false, nrc: r.bytes[2] };
+    return { ok: false, err: r.error || 'нет ответа' };
+  }
   async readFreeze() {
     const r = await this.request('020200');
     if (!r.bytes || r.bytes[0] !== 0x42) return null;
@@ -743,31 +764,89 @@ class Obd {
     return { ok: false, err: r.error || 'нет ответа' };
   }
   async clearUdsDtcs() {
-    const r = await this.uds('14FFFFFF', 5000);
-    return { ok: !!(r.bytes && r.bytes[0] === 0x54), nrc: (r.bytes && r.bytes[0] === 0x7F) ? r.bytes[2] : null, err: r.error };
+    // UDS 14 FFFFFF — стереть все группы кодов. Если блок не принимает в обычной сессии — пробуем в расширенной (10 03) и возвращаемся в обычную (10 01)
+    let r = await this.uds('14FFFFFF', 6000), ext = false;
+    if (r.bytes && r.bytes[0] === 0x7F && [0x22, 0x31, 0x7F].includes(r.bytes[2])) {
+      const s = await this.uds('1003', 3000);
+      if (s.bytes && s.bytes[0] === 0x50) { ext = true; r = await this.uds('14FFFFFF', 6000); await this.uds('1001', 3000); }
+    }
+    return { ok: !!(r.bytes && r.bytes[0] === 0x54), nrc: (r.bytes && r.bytes[0] === 0x7F) ? r.bytes[2] : null, err: r.bytes ? null : r.error, ext };
   }
 }
 
+// ---------- Распознавание автомобиля по VIN и блоку двигателя ----------
+const VAG_WMI = { TMB: 'Škoda', WVW: 'Volkswagen', WVG: 'Volkswagen', WV1: 'Volkswagen Commercial', WV2: 'Volkswagen Commercial', WV3: 'Volkswagen Commercial', '1VW': 'Volkswagen', '3VW': 'Volkswagen', '9BW': 'Volkswagen', LSV: 'Volkswagen', LFV: 'Volkswagen', WAU: 'Audi', WUA: 'Audi', TRU: 'Audi', VSS: 'SEAT / CUPRA', WP0: 'Porsche', WP1: 'Porsche' };
+// Код типа VAG в позициях 7–8 VIN
+const VAG_MODELS = {
+  'Škoda': { '1U': 'Octavia I', '1Z': 'Octavia II', '5E': 'Octavia III', NX: 'Octavia IV', '6Y': 'Fabia I', '5J': 'Fabia II / Roomster', NJ: 'Fabia III', NH: 'Rapid', '3U': 'Superb I', '3T': 'Superb II', '3V': 'Superb III', '5L': 'Yeti', NS: 'Kodiaq', NU: 'Karoq', NW: 'Scala / Kamiq' },
+  'Volkswagen': { '1J': 'Golf IV / Bora', '1K': 'Golf V / VI / Jetta', AU: 'Golf VII', CD: 'Golf VIII', '6R': 'Polo V', AW: 'Polo VI', '3C': 'Passat / Passat CC', '5N': 'Tiguan', '1T': 'Touran I', '7P': 'Touareg II' },
+  'Volkswagen Commercial': { '2K': 'Caddy III', '7H': 'Transporter T5' },
+  'Audi': { '8P': 'A3 (8P)', '8V': 'A3 (8V)', '8K': 'A4 (B8)', '8W': 'A4 (B9)', '4F': 'A6 (C6)', '4G': 'A6 / A7 (C7)', '8U': 'Q3', '8R': 'Q5', '4L': 'Q7', '8X': 'A1' },
+  'SEAT / CUPRA': { '1P': 'Leon II', '5F': 'Leon III', '6J': 'Ibiza IV', NH: 'Toledo IV', '5P': 'Altea' }
+};
+function vinYear(c) {
+  const codes = 'ABCDEFGHJKLMNPRSTVWXY123456789'; const i = codes.indexOf(c); if (i < 0) return null;
+  const now = new Date().getFullYear(); let y = 1980 + i; while (y + 30 <= now + 1) y += 30; return y;
+}
+function decodeVin(vin) {
+  const v = String(vin || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+  if (v.length !== 17) return { vin: v || null };
+  const brand = VAG_WMI[v.slice(0, 3)] || null; const code = v.slice(6, 8);
+  return { vin: v, brand, isVag: !!brand, modelCode: brand ? code : null, model: brand && VAG_MODELS[brand] ? VAG_MODELS[brand][code] || null : null, year: vinYear(v[9]) };
+}
+// Профиль двигателя: тип топлива, объём, турбо — автоматически, с ручной поправкой в настройках
+function buildProfile(info, status, engMod, cfg) {
+  const p = Object.assign({}, decodeVin(info && info.vin));
+  const id = engMod && engMod.dids ? engMod.dids : {};
+  const asc = k => id[k] ? toAscii(hexBytes(id[k])) : '';
+  p.engName = asc('F197') || null; p.engCode = asc('F1AD') || null;
+  if (!p.isVag && /^[0-9][0-9A-Z]{2}9[0-9]{5}/.test(asc('F187').replace(/\s/g, ''))) p.isVag = true;
+  let fuel = null;
+  if (/EDC|TDI|DCM/i.test(p.engName || '')) fuel = 'diesel'; else if (/MED|MEV|SIMOS|TSI|TFSI|MPI|ME7/i.test(p.engName || '')) fuel = 'petrol';
+  if (!fuel && status) fuel = status.diesel ? 'diesel' : 'petrol';
+  const manFuel = cfg && cfg.fuel && cfg.fuel !== 'auto', manDisp = cfg && cfg.disp && cfg.disp !== 'auto';
+  p.fuel = manFuel ? cfg.fuel : fuel; p.fuelSrc = manFuel ? 'вручную' : (fuel ? 'авто' : '—');
+  const dm = (p.engName || '').match(/(\d)[,.](\d)\s*L/i);
+  const autoDisp = dm ? parseFloat(dm[1] + '.' + dm[2]) : null;
+  p.disp = manDisp ? parseFloat(cfg.disp) : autoDisp; p.dispSrc = manDisp ? 'вручную' : (autoDisp ? 'авто' : '—');
+  p.turbo = p.fuel === 'diesel' ? true : null;
+  return p;
+}
+function profileTitle(p) {
+  if (!p) return null;
+  const car = [p.brand, p.model].filter(Boolean).join(' ') || (p.isVag ? 'VAG' : 'Автомобиль');
+  const eng = [p.disp ? p.disp.toFixed(1).replace('.', ',') : null, p.fuel === 'diesel' ? 'дизель' : p.fuel === 'petrol' ? 'бензин' : null].filter(Boolean).join(' ');
+  return car + (p.year ? ' ' + p.year : '') + (eng ? ' · ' + eng : '');
+}
+
 // ---------- Расход топлива ----------
-const DIESEL_DENSITY = 832; // г/л
-function maxTorque(rpm, eng) {
-  const Tp = eng === '90' ? 230 : 250, Pmax = eng === '90' ? 66000 : 77000;
+const DENSITY = { diesel: 832, petrol: 745 }; // г/л
+const DIESEL_DENSITY = DENSITY.diesel;
+function maxTorque(rpm, prof) {
+  const L = (prof && prof.disp) || 1.6; const Tp = 160 * L, Pmax = 48000 * L;
   let T = rpm < 1500 ? Tp * (0.55 + 0.45 * Math.max(0, rpm - 800) / 700) : Tp;
   const w = rpm * 2 * Math.PI / 60; if (w > 0) T = Math.min(T, Pmax / w);
   return Math.max(0, T);
 }
-function fuelLh(v, cfg, lambdaMax) {
+function fuelLh(v, prof, lambdaMax) {
+  const fuel = (prof && prof.fuel) || 'diesel', dens = DENSITY[fuel];
   if (v.fuelRate != null) return { lh: v.fuelRate, m: 'ecu' };
-  if (v.fuelGs != null) return { lh: v.fuelGs * 3600 / DIESEL_DENSITY, m: 'ecu' };
+  if (v.fuelGs != null) return { lh: v.fuelGs * 3600 / dens, m: 'ecu' };
   if (v.rpm != null && v.rpm < 300) return { lh: 0, m: null };
+  if (fuel === 'petrol') {
+    if (v.maf == null) return { lh: null, m: null };
+    if (v.fsys === 4 && (v.load == null || v.load < 25)) return { lh: 0, m: 'maf' }; // отсечка топлива при торможении двигателем
+    const lam = v.lamCmd && v.lamCmd > 0.6 && v.lamCmd < 1.5 ? v.lamCmd : 1;
+    return { lh: v.maf / (14.7 * lam) * 3600 / dens, m: 'maf' };
+  }
   if (v.maf != null && v.lam != null && v.lam > 0.6 && v.lam < (lambdaMax || 2) * 0.98) return { lh: v.maf / (14.5 * v.lam) * 3600 / DIESEL_DENSITY, m: 'maf' };
   if (v.load != null && v.rpm != null) {
-    const T = maxTorque(v.rpm, cfg.engine) * v.load / 100; const kW = T * v.rpm * 2 * Math.PI / 60 / 1000;
+    const T = maxTorque(v.rpm, prof) * v.load / 100; const kW = T * v.rpm * 2 * Math.PI / 60 / 1000;
     return { lh: kW * 235 / DIESEL_DENSITY, m: 'est' };
   }
   return { lh: null, m: null };
 }
-const METHOD_NAME = { ecu: 'по данным ЭБУ о подаче топлива', maf: 'по ДМРВ и лямбда-зонду', est: 'грубая оценка по нагрузке и оборотам (±25–30%)' };
+const METHOD_NAME = { ecu: 'по данным ЭБУ о подаче топлива', maf: 'по расходомеру воздуха (ДМРВ) и составу смеси', est: 'грубая оценка по нагрузке и оборотам (±25–30%)' };
 
 class Trip {
   constructor() { this.reset(); }
@@ -837,7 +916,7 @@ class CoastTest {
 function sumDt(S, pred) { let t = 0; for (let i = 1; i < S.length; i++) { if (pred(S[i], i)) t += Math.min(5, (S[i].t - S[i - 1].t) / 1000); } return t; }
 function analyze(S, ctx) {
   const F = []; const add = (level, title, text) => F.push({ level, title, text });
-  const sup = ctx.supported || new Set(); const cfg = ctx.cfg || {};
+  const sup = ctx.supported || new Set(); const cfg = ctx.cfg || {}; const prof = ctx.profile || {}; const diesel = prof.fuel !== 'petrol';
   const dur = S.length > 1 ? (S[S.length - 1].t - S[0].t) / 1000 : 0;
   const mins = s => Math.round(s / 60);
   const ff = (x, d = 0) => x == null ? '—' : x.toFixed(d).replace('.', ',');
@@ -860,7 +939,7 @@ function analyze(S, ctx) {
     const maxE = Math.max(...E.map(s => s.ect));
     const drive = sumDt(S, s => (s.spd || 0) > 5);
     let reached = false; const coolAtSpeed = sumDt(S, s => { if (s.ect != null && s.ect >= 85) reached = true; return reached && s.spd > 60 && s.ect != null && s.ect < 75; });
-    if (maxE < 80 && drive >= 600) add('bad', 'Двигатель не прогревается — вероятно, термостат', `За ${mins(dur)} мин температура ОЖ поднялась только до ${ff(maxE)} °C (норма ~85–95 °C). Холодному дизелю ЭБУ подаёт больше топлива, а регенерация сажевого фильтра не может нормально завершиться. Это одна из самых частых причин большого расхода у 1.6 TDI зимой. Проверьте термостат и датчик температуры ОЖ.`);
+    if (maxE < 80 && drive >= 600) add('bad', 'Двигатель не прогревается — вероятно, термостат', `За ${mins(dur)} мин температура ОЖ поднялась только до ${ff(maxE)} °C (норма ~85–95 °C). Холодному мотору ЭБУ подаёт больше топлива${diesel ? ', а регенерация сажевого фильтра не может нормально завершиться' : ''}. Это одна из самых частых причин большого расхода зимой. Проверьте термостат и датчик температуры ОЖ.`);
     else if (coolAtSpeed > 120) add('bad', 'На трассе двигатель остывает — термостат открыт', `После прогрева на скорости выше 60 км/ч температура падала ниже 75 °C (~${mins(coolAtSpeed)} мин). Термостат не держит температуру.`);
     else if (maxE < 85 && drive >= 600) add('warn', 'Слабый прогрев', `Максимум ${ff(maxE)} °C за ${mins(dur)} мин. В сильный мороз так бывает и у исправной машины. Если на улице выше нуля, проверьте термостат.`);
     else if (maxE >= 85) add('ok', 'Прогрев в норме', `Рабочая температура ${ff(maxE)} °C достигнута.`);
@@ -875,18 +954,19 @@ function analyze(S, ctx) {
     if (tot > 0 && idle / tot > 0.25) parts.push(`${Math.round(idle / tot * 100)}% времени двигатель работал на месте`);
     if (tot > 0 && cold / tot > 0.3) parts.push(`${Math.round(cold / tot * 100)}% времени — на непрогретом двигателе`);
     if (avg != null && avg < 20) parts.push(`средняя скорость ${ff(avg)} км/ч`);
-    if (parts.length) add('warn', 'Режим езды сам по себе повышает расход', parts.join('; ') + '. На месте топливо тратится, а километры не идут, поэтому расход «на 100 км» в пробках и при прогреве резко растёт даже у исправного дизеля.');
+    if (parts.length) add('warn', 'Режим езды сам по себе повышает расход', parts.join('; ') + '. На месте топливо тратится, а километры не идут, поэтому расход «на 100 км» в пробках и при прогреве резко растёт даже у исправного двигателя.');
     else add('ok', 'Режим езды обычный', 'Доля холостого хода и езды на холодном двигателе небольшая.');
   }
 
   // 4. ДМРВ: проверка наполнения цилиндров
   if (!sup.has(0x10) || !sup.has(0x0B)) add('info', 'ДМРВ: нет нужных параметров', 'Блок не отдаёт расход воздуха или давление во впуске по стандартному OBD.');
+  else if (!prof.disp) add('info', 'ДМРВ: нужен объём двигателя', 'Объём не удалось определить автоматически. Укажите его на вкладке «Связь» в карточке «Профиль автомобиля».');
   else {
     const W = S.filter(s => s.load >= 80 && s.rpm >= 1800 && s.rpm <= 3600 && s.maf != null && s.map != null && !(s.egrCmd > 10));
     if (W.length < 6) add('info', 'ДМРВ и наддув: нужен разгон', 'Сделайте 2–3 разгона на 3-й передаче с 1500 до 3500 об/мин с педалью в пол, где это безопасно. Приложение сравнит показания расходомера воздуха с тем, сколько воздуха физически проходит через мотор.');
     else {
-      const ve = median(W.map(s => { const T = (s.iat != null ? s.iat : 30) + 273.15; const rho = s.map * 1000 / (287.05 * T); return s.maf / (rho * 1.598 * s.rpm / 120); }));
-      if (ve < 0.70) add('bad', 'Расходомер воздуха (ДМРВ) занижает', `Наполнение по ДМРВ ${Math.round(ve * 100)}% при норме ~80–95%. ДМРВ видит меньше воздуха, чем проходит на самом деле: загрязнение или износ датчика (на EA189 проверьте и сетку перед ним) либо подсос воздуха между ДМРВ и турбиной. ЭБУ неправильно считает смесь и работу EGR.`);
+      const ve = median(W.map(s => { const T = (s.iat != null ? s.iat : 30) + 273.15; const rho = s.map * 1000 / (287.05 * T); return s.maf / (rho * prof.disp * s.rpm / 120); }));
+      if (ve < 0.70) add('bad', 'Расходомер воздуха (ДМРВ) занижает', `Наполнение по ДМРВ ${Math.round(ve * 100)}% при норме ~80–95%. ДМРВ видит меньше воздуха, чем проходит на самом деле: загрязнение или износ датчика (на дизелях EA189 проверьте и сетку перед ним) либо подсос воздуха после ДМРВ. ЭБУ неправильно считает смесь.`);
       else if (ve > 1.15) add('bad', 'Утечка наддувочного воздуха или неверный датчик', `Наполнение по ДМРВ ${Math.round(ve * 100)}%: физически столько воздуха при этом давлении не пройдёт. Типичная причина — утечка из патрубков интеркулера. Реже неправильно показывает ДМРВ или датчик давления.`);
       else add('ok', 'ДМРВ правдоподобен', `Наполнение ${Math.round(ve * 100)}% — в норме.`);
     }
@@ -899,12 +979,12 @@ function analyze(S, ctx) {
     if (dev < -20) add('bad', 'Недодув: давление ниже заданного', `Фактический наддув в среднем на ${ff(-dev)} кПа ниже заданного ЭБУ. Проверьте патрубки и интеркулер, вакуумные трубки и привод изменяемой геометрии турбины.`);
     else if (dev > 20) add('warn', 'Передув: давление выше заданного', `В среднем на ${ff(dev)} кПа выше задания. Возможно залипание геометрии турбины.`);
     else add('ok', 'Наддув соответствует заданному', `Отклонение ${ff(dev)} кПа.`);
-  } else {
+  } else if (diesel) {
     const B = S.filter(s => s.load >= 85 && s.rpm >= 2000 && s.rpm <= 3200 && s.map != null);
     if (B.length >= 6) {
       const g = median(B.map(s => s.map - (s.baro || 101)));
-      if (g < 50) add('bad', 'Слабый наддув', `При полной нагрузке всего ${ff(g / 100, 2)} бар избыточного давления (ориентир для этого мотора ~1,0–1,3 бар). Проверьте патрубки, интеркулер, вакуумную систему и геометрию турбины.`);
-      else if (g < 80) add('warn', 'Наддув ниже ожидаемого', `${ff(g / 100, 2)} бар при полной нагрузке (ориентир ~1,0–1,3 бар). Повторите замер на прогретом двигателе.`);
+      if (g < 50) add('bad', 'Слабый наддув', `При полной нагрузке всего ${ff(g / 100, 2)} бар избыточного давления (ориентир для турбодизелей VAG ~1,0–1,5 бар). Проверьте патрубки, интеркулер, вакуумную систему и геометрию турбины.`);
+      else if (g < 80) add('warn', 'Наддув ниже ожидаемого', `${ff(g / 100, 2)} бар при полной нагрузке (ориентир ~1,0–1,5 бар). Повторите замер на прогретом двигателе.`);
       else add('ok', 'Наддув в норме', `${ff(g / 100, 2)} бар избыточного давления при полной нагрузке.`);
     }
   }
@@ -919,7 +999,7 @@ function analyze(S, ctx) {
     }
     if (ev > 0 && regT > 60) add('warn', 'Во время поездки шла регенерация сажевого фильтра', `${ev} раз(а), всего ~${mins(regT)} мин (температура выше 500 °C). Во время выжига сажи расход заметно выше. Если регенерации очень частые или постоянно прерываются короткими поездками, это частая причина большого расхода. Массу сажи и пробег с последней регенерации можно проверить дилерским сканером на СТО.`);
     else add('ok', 'Регенерации сажевого фильтра не было', `Максимальная температура ${ff(maxT)} °C.`);
-  } else if (dur > 120) add('info', 'Сажевый фильтр: нет данных по OBD', 'Блок не отдаёт температуру фильтра по стандартному OBD. Массу сажи и пробег с последней регенерации показывает дилерский сканер на СТО (группы измерений блока двигателя). Частые или прерванные регенерации сильно поднимают расход.');
+  } else if (dur > 120 && diesel) add('info', 'Сажевый фильтр: нет данных по OBD', 'Блок не отдаёт температуру фильтра по стандартному OBD. Массу сажи и пробег с последней регенерации показывает дилерский сканер на СТО (группы измерений блока двигателя). Частые или прерванные регенерации сильно поднимают расход.');
 
   // 7. EGR
   const G = S.filter(s => s.egrErr != null && s.egrCmd != null && s.egrCmd > 10);
@@ -929,13 +1009,22 @@ function analyze(S, ctx) {
     else add('ok', 'Клапан EGR отрабатывает команду', `Отклонение ${ff(e)}%.`);
   }
 
+  // 7б. Топливные коррекции (бензин): показывают, не льёт ли мотор лишнее
+  const FT = S.filter(s => s.ltft != null && s.stft != null && s.ect != null && s.ect >= 75 && s.fsys === 2);
+  if (!diesel && FT.length >= 20) {
+    const t = median(FT.map(s => s.ltft + s.stft));
+    if (t < -10) add('bad', 'Смесь богатая: блок убирает топливо', `Суммарная коррекция ${ff(t)}%. Мотор получает больше топлива, чем нужно, — прямая причина перерасхода. Частые причины: подтекающие форсунки, давление топлива, клапан продувки адсорбера, неверный ДМРВ.`);
+    else if (t > 10) add('warn', 'Смесь бедная: блок добавляет топливо', `Суммарная коррекция +${ff(t)}%. Возможен подсос воздуха после ДМРВ, слабый топливный насос или загрязнённый ДМРВ.`);
+    else add('ok', 'Топливные коррекции в норме', `Суммарная коррекция ${ff(t)}%.`);
+  }
+
   // 8. Расход на ровной скорости
   const C = S.filter(s => s.spd >= 80 && s.spd <= 100 && s.lh != null && s.load < 60);
   if (C.length >= 20) {
     const l = median(C.map(s => s.lh / s.spd * 100)); const meth = median(C.map(s => s.meth === 'est' ? 1 : 0)) ? 'est' : 'ok';
     if (meth === 'est') add('info', 'Расход на 80–100 км/ч (оценка)', `≈ ${ff(l, 1)} л/100 км по грубой оценке. Для вывода нужна точная цифра: журнал заправок после поездки по трассе.`);
-    else if (l > 6.5) add('bad', 'Высокий расход на ровной скорости', `${ff(l, 1)} л/100 км на 80–100 км/ч. Для этого мотора это много. Проверьте сопротивление качению (тест выбега, давление в шинах, суппорта) и форсунки.`);
-    else if (l > 5.5) add('warn', 'Расход на трассе немного выше обычного', `${ff(l, 1)} л/100 км на 80–100 км/ч.`);
+    else if (l > (diesel ? 6.5 : 8.5)) add('bad', 'Высокий расход на ровной скорости', `${ff(l, 1)} л/100 км на 80–100 км/ч. Для легкового ${diesel ? 'дизеля' : 'бензинового мотора'} это много. Проверьте сопротивление качению (тест выбега, давление в шинах, суппорта) и форсунки.`);
+    else if (l > (diesel ? 5.5 : 7.2)) add('warn', 'Расход на трассе немного выше обычного', `${ff(l, 1)} л/100 км на 80–100 км/ч.`);
     else add('ok', 'Расход на трассе в норме', `${ff(l, 1)} л/100 км на 80–100 км/ч.`);
   }
 
@@ -968,8 +1057,8 @@ function diffBackups(a, b) {
 }
 
 // ---------- Монитор: опрос, поездка, блоки, копии ----------
-const FAST_CAND = [0x0C, 0x0D, 0x04, 0x10, 0x0B, 0x5E, 0x34, 0x05];
-const SLOW_CAND = [0x05, 0x0F, 0x33, 0x46, 0x2C, 0x2D, 0x23, 0x49, 0x42, 0x5C, 0x2F, 0x61, 0x62, 0x1F, 0x11, 0x34, 0x5E];
+const FAST_CAND = [0x0C, 0x0D, 0x04, 0x10, 0x0B, 0x5E, 0x03, 0x34, 0x05];
+const SLOW_CAND = [0x05, 0x0F, 0x33, 0x46, 0x2C, 0x2D, 0x23, 0x49, 0x42, 0x5C, 0x2F, 0x61, 0x62, 0x1F, 0x11, 0x34, 0x5E, 0x03, 0x06, 0x07, 0x44];
 const BIG_CAND = [0x70, 0x78, 0x7A, 0x7C, 0x9D];
 class Monitor {
   constructor(cfg) {
@@ -1003,8 +1092,19 @@ class Monitor {
     this.emit('info', this.info);
     this.status = await this.obd.readStatus(); this.emit('status', this.status);
     this.dtc = await this.obd.readObdDtcs(); this.emit('dtc', this.dtc);
+    this.updateProfile();
     this.trip.last = null; this.running = true; this.emit('state', 'connected');
     this._loop();
+    // полностью автоматически: опрос всех блоков VAG сразу после подключения
+    if (this.cfg.autoScan !== false && (this.profile.isVag || transport.kind === 'demo')) {
+      setTimeout(() => { if (this.running) this.autoscan((f, m) => this.emit('scanprog', { f, m })).catch(e => this.log('Автоскан: ' + e.message)); }, 1500);
+    }
+  }
+  updateProfile() {
+    const eng = (this.modules || []).find(m => m.addr === '01' && m.present);
+    this.profile = buildProfile(this.info, this.status, eng, this.cfg);
+    if (this.transport && this.transport.kind === 'demo') this.profile.isVag = true;
+    this.emit('profile', this.profile); return this.profile;
   }
   async _loop() {
     while (this.running) {
@@ -1044,7 +1144,8 @@ class Monitor {
     if (this.cycle % 2 === 0 && this.slowChunks.length) { const ch = this.slowChunks[this.slowIdx++ % this.slowChunks.length]; await this._readPids(ch); }
     if (this.cycle % 4 === 0 && this.big.length) { const p = this.big[this.bigIdx++ % this.big.length]; await this._readPids([p]); }
     if (this.cycle % 60 === 0) { const st = await this.obd.readStatus(); if (st) { this.status = st; this.emit('status', st); } }
-    const v = this.v; const f = fuelLh(v, this.cfg, this.obd.lambdaMax);
+    const v = this.v; const f = fuelLh(v, this.profile, this.obd.lambdaMax);
+    if (this.profile && this.profile.turbo == null && v.map != null && v.map > (v.baro || 101) + 25) this.profile.turbo = true;
     const s = { t: clock(), rpm: v.rpm, spd: v.spd, load: v.load, maf: v.maf, map: v.map, baro: v.baro, iat: v.iat, ect: v.ect, amb: v.amb, egrCmd: v.egrCmd, egrErr: v.egrErr, rail: v.rail, dpfT: v.dpfT, dpfDp: v.dpfDp, egt: v.egt, bCmd: v.bCmd, bAct: v.bAct, lam: v.lam, lh: f.lh, meth: f.m };
     this.samples.push(s); if (this.samples.length > 30000) this.samples.splice(0, 2000);
     this.trip.add(s);
@@ -1062,7 +1163,26 @@ class Monitor {
   }
   async readDtcs() { return this.op(async () => { this.dtc = await this.obd.readObdDtcs(); this.status = await this.obd.readStatus() || this.status; this.emit('status', this.status); this.emit('dtc', this.dtc); return this.dtc; }); }
   async readFreeze() { return this.op(() => this.obd.readFreeze()); }
-  async clearDtcs() { return this.op(async () => { const ok = await this.obd.clearObd(); await sleep(500); this.dtc = await this.obd.readObdDtcs(); this.emit('dtc', this.dtc); return ok; }); }
+  async clearDtcs() {
+    return this.op(async () => {
+      const before = this.dtc; let obd, uds, udsAfter = null;
+      await this.obd.slow(true);
+      try {
+        obd = await this.obd.clearObd();
+        // у VAG коды производителя хранятся в UDS-памяти блока — стираем и её
+        await this.obd.selectModule(MODULES[0]);
+        uds = await this.obd.clearUdsDtcs();
+        await sleep(1500);
+        const ua = await this.obd.readUdsDtcs(); if (ua.ok) udsAfter = ua.list;
+        await this.obd.restoreEngine();
+        this.dtc = await this.obd.readObdDtcs();
+        this.status = await this.obd.readStatus() || this.status;
+      } finally { await this.obd.slow(false); }
+      if (udsAfter) { this.engineUds = udsAfter; const m = (this.modules || []).find(x => x.addr === '01'); if (m) m.dtc = udsAfter; }
+      this.emit('dtc', this.dtc); this.emit('status', this.status); if (this.modules) this.emit('modules', this.modules);
+      return { obd, uds, before, after: this.dtc, udsAfter };
+    });
+  }
   async _scanModule(m, deepRanges, progress) {
     await this.obd.selectModule(m);
     const first = await this.obd.readDid(0xF187);
@@ -1086,10 +1206,16 @@ class Monitor {
       for (let i = 0; i < MODULES.length; i++) { const m = MODULES[i]; progress(i / MODULES.length, `Опрос ${m.addr} — ${m.name}…`); res.push(await this._scanModule(m)); }
       progress(1, 'Готово');
       this.modules = res; const eng = res.find(x => x.addr === '01'); this.engineUds = eng && eng.dtc ? eng.dtc : null;
-      this.emit('modules', res); return res;
+      this.emit('modules', res); this.updateProfile(); return res;
     });
   }
-  async clearModule(m) { return this.op(async () => { await this.obd.selectModule(m); const r = await this.obd.clearUdsDtcs(); await sleep(400); const d = await this.obd.readUdsDtcs(); return { r, after: d.ok ? d.list : null }; }); }
+  async clearModule(m) {
+    return this.op(async () => {
+      await this.obd.slow(true);
+      try { await this.obd.selectModule(m); const r = await this.obd.clearUdsDtcs(); await sleep(1500); const d = await this.obd.readUdsDtcs(); return { r, after: d.ok ? d.list : null }; }
+      finally { await this.obd.slow(false); }
+    });
+  }
   async makeBackup(deepRanges, progress) {
     return this.op(async () => {
       const b = { format: 'rapid-obd-backup', version: 1, created: new Date().toISOString(), adapter: this.info.adapter, elm: this.info.elm, protocol: this.info.proto, obd: {}, modules: [] };
@@ -1162,8 +1288,8 @@ class DemoTransport {
     this.noHeaders = !!opt.noHeaders; this.car = new DemoCar(); this.inb = ''; this.reset(); this.t0 = clock();
     this.engStored = ['P0128']; this.engUds = [[0x01, 0x28, 0x00, 0x08]];
     this.mods = {
-      '7E0': { resp: '7E8', dids: { F187: 'DEMO-ENG-01', F189: '0001', F191: 'DEMO-HW-01', F1A3: 'H01', F197: 'R4 1,6L EDC', F18C: 'DEMO000001', '0600': [0x01, 0x0A, 0x00, 0x00, 0x20, 0x14] }, dtc: 'eng' },
-      '713': { resp: '77D', dids: { F187: 'DEMO-ABS-03', F189: '0102', F197: 'ESP MK60EC1', '0600': [0x00, 0x34, 0x12] }, dtc: [] },
+      '7E0': { resp: '7E8', dids: { F187: 'DEMO-ENG-01', F189: '0001', F191: 'DEMO-HW-01', F1A3: 'H01', F197: 'R4 1,6L EDC', F1AD: 'CAYC', F18C: 'DEMO000001', '0600': [0x01, 0x0A, 0x00, 0x00, 0x20, 0x14] }, dtc: 'eng' },
+      '713': { resp: '77D', dids: { F187: 'DEMO-ABS-03', F189: '0102', F197: 'ESP MK60EC1', '0600': [0x00, 0x34, 0x12] }, dtc: [[0x41, 0x21, 0x00, 0x09]] },
       '715': { resp: '77F', dids: { F187: 'DEMO-AIRB-15', F189: '0040', F197: 'AirbagVW10', '0600': [0x12, 0x34, 0x56, 0x00] }, dtc: [] },
       '714': { resp: '77E', dids: { F187: 'DEMO-INST-17', F189: '0220', F197: 'KOMBI', '0600': [0x00, 0x00, 0x0C, 0x05, 0x10] }, dtc: [] },
       '710': { resp: '77A', dids: { F187: 'DEMO-GW-19', F189: '0310', F197: 'Gateway', '0600': [0x03, 0x00, 0x40, 0x00] }, dtc: [] }
@@ -1250,10 +1376,10 @@ class DemoTransport {
     } else if (target === '7E0' && sv === 0x03) { pl = [0x43, this.engStored.length]; for (const x of this.engStored) pl.push(0x01, 0x28); }
     else if (target === '7E0' && sv === 0x07) pl = [0x47, 0x00];
     else if (target === '7E0' && sv === 0x0A) pl = [0x4A, 0x00];
-    else if (target === '7E0' && sv === 0x04) { this.engStored = []; this.engUds = []; pl = [0x44]; }
+    else if (target === '7E0' && sv === 0x04) { this.engStored = []; return this.fmt([0x7F, 0x04, 0x78], hdr) + '\r' + this.fmt([0x44], hdr); }
     else if (target === '7E0' && sv === 0x09) {
       const pid = by[1];
-      if (pid === 0x02) pl = [0x49, 0x02, 0x01, ...[...'DEMO0RAPID0TDI000'].map(ch => ch.charCodeAt(0))];
+      if (pid === 0x02) pl = [0x49, 0x02, 0x01, ...[...'TMBDEMNH0DX000000'].map(ch => ch.charCodeAt(0))];
       else if (pid === 0x04) { const s = 'DEMOCAL0000001  '; pl = [0x49, 0x04, 0x01, ...[...s].map(ch => ch.charCodeAt(0))]; }
       else if (pid === 0x06) pl = [0x49, 0x06, 0x01, 0xDE, 0x30, 0x12, 0x34];
       else if (pid === 0x0A) { const s = 'ECM-EngineControl'; pl = [0x49, 0x0A, 0x01, ...[...s.padEnd(20, '\0')].map(ch => ch.charCodeAt(0))]; }
@@ -1264,7 +1390,11 @@ class DemoTransport {
       else pl = [0x62, by[1], by[2], ...(Array.isArray(v) ? v : [...v].map(ch => ch.charCodeAt(0)))];
     } else if (sv === 0x19) {
       const list = mod.dtc === 'eng' ? this.engUds : mod.dtc; pl = [0x59, 0x02, 0xFF]; for (const d of list) pl.push(...d);
-    } else if (sv === 0x14) { if (mod.dtc === 'eng') { this.engUds = []; this.engStored = []; } else mod.dtc = []; pl = [0x54]; }
+    } else if (sv === 0x10) { mod.session = by[1]; pl = [0x50, by[1], 0x00, 0x32, 0x01, 0xF4]; }
+    else if (sv === 0x14) {
+      if (mod.dtc === 'eng' && mod.session !== 0x03) pl = [0x7F, 0x14, 0x7F];
+      else { if (mod.dtc === 'eng') { this.engUds = []; this.engStored = []; } else mod.dtc = mod.dtc.filter(d => d[3] & 1); pl = [0x54]; }
+    }
     else if (sv === 0x3E) pl = [0x7E, 0x00];
     else pl = [0x7F, sv, 0x11];
     return this.fmt(pl, hdr);
@@ -1282,9 +1412,28 @@ const store = {
   get(k, def) { try { const v = localStorage.getItem('rapidobd.' + k); return v == null ? def : JSON.parse(v); } catch (e) { return def; } },
   set(k, v) { try { localStorage.setItem('rapidobd.' + k, JSON.stringify(v)); return true; } catch (e) { return false; } }
 };
-const cfg = Object.assign({ engine: '105', proto: 'can' }, store.get('cfg', {}));
-$('#cfgEngine').value = cfg.engine; $('#cfgProto').value = cfg.proto;
-$('#cfgEngine').onchange = e => { cfg.engine = e.target.value; store.set('cfg', cfg); };
+const cfg = Object.assign({ fuel: 'auto', disp: 'auto', proto: 'can', autoScan: true }, store.get('cfg', {}));
+delete cfg.engine;
+$('#cfgProto').value = cfg.proto; $('#cfgFuel').value = cfg.fuel; $('#cfgDisp').value = cfg.disp; $('#cfgAutoScan').checked = cfg.autoScan !== false;
+const saveCfg = () => { store.set('cfg', cfg); if (mon && mon.obd) mon.updateProfile(); };
+$('#cfgFuel').onchange = e => { cfg.fuel = e.target.value; saveCfg(); };
+$('#cfgDisp').onchange = e => { cfg.disp = e.target.value; saveCfg(); };
+$('#cfgAutoScan').onchange = e => { cfg.autoScan = e.target.checked; saveCfg(); };
+function renderProfile(p) {
+  if (!p) return;
+  $('#carName').textContent = '· ' + (profileTitle(p) || '');
+  const fuelTxt = p.fuel === 'diesel' ? 'дизель' : p.fuel === 'petrol' ? 'бензин' : '—';
+  const rows = [
+    ['Автомобиль', [p.brand, p.model].filter(Boolean).join(' ') || (p.isVag ? 'VAG (модель не распознана)' : 'не VAG / не распознан — работает стандартный OBD')],
+    ['Год модели', p.year], ['VIN', p.vin], ['Код модели', p.modelCode],
+    ['Двигатель', [p.engName, p.engCode].filter(Boolean).join(' · ') || null],
+    ['Топливо', fuelTxt + ' (' + p.fuelSrc + ')'],
+    ['Объём', (p.disp ? p.disp.toFixed(1).replace('.', ',') + ' л' : '—') + ' (' + p.dispSrc + ')'],
+    ['Наддув', p.turbo ? 'есть' : 'не определён'],
+    ['Профиль', p.isVag ? 'VAG: автоскан блоков, коды производителя' : 'стандартный OBD']
+  ];
+  $('#profKv').innerHTML = rows.filter(r => r[1] != null && r[1] !== '').map(r => `<span>${esc(r[0])}</span><span class="${r[0] === 'VIN' ? 'mono' : ''}">${esc(r[1])}</span>`).join('');
+}
 $('#cfgProto').onchange = e => { cfg.proto = e.target.value; store.set('cfg', cfg); };
 
 let mon = null, isDemo = false, wakeLock = null, realClock = clock;
@@ -1354,6 +1503,8 @@ async function startWith(transport) {
   mon.on('status', renderStatus);
   mon.on('dtc', renderDtc);
   mon.on('modules', renderModules);
+  mon.on('profile', p => { renderProfile(p); if (mon.obd) buildTiles(); });
+  mon.on('scanprog', ({ f, m }) => prog('#scanBar', '#scanMsg')(f, m));
   mon.on('sample', onSample);
   try { await mon.connect(transport); }
   catch (e) {
@@ -1398,6 +1549,9 @@ const TILES = [
   { k: 'egt', n: 'Температура выхлопа', u: '°C', d: 0, pid: 0x78 },
   { k: 'oil', n: 'Масло', u: '°C', d: 0, pid: 0x5C },
   { k: 'fuelRate', n: 'Расход по ЭБУ', u: 'л/ч', d: 2, pid: 0x5E },
+  { k: 'stft', n: 'Коррекция топлива краткоср.', u: '%', d: 1, pid: 0x06, cls: v => Math.abs(v) > 15 ? 'warn' : '' },
+  { k: 'ltft', n: 'Коррекция топлива долгоср.', u: '%', d: 1, pid: 0x07, cls: v => Math.abs(v) > 10 ? 'warn' : '' },
+  { k: 'lamCmd', n: 'Лямбда заданная', u: 'λ', d: 2, pid: 0x44 },
   { k: 'tqAct', n: 'Крутящий момент', u: '%', d: 0, pid: 0x62 },
   { k: 'volt', n: 'Бортсеть', u: 'В', d: 1, pid: 0x42, cls: v => v < 12 ? 'bad' : v < 13.2 ? 'warn' : 'ok' },
   { k: 'fuelLvl', n: 'Топливо в баке', u: '%', d: 0, pid: 0x2F },
@@ -1526,12 +1680,44 @@ async function snapshotBeforeClear(label, extra) {
   try { snap.obd.freeze = await mon.readFreeze(); } catch (e) { }
   saveBackup(snap); return snap;
 }
+const running = () => mon && mon.v && mon.v.rpm > 300;
+const ENGINE_OFF_TXT = '<div class="warnbox"><b>Двигатель работает.</b> Многие блоки стирают ошибки только при заглушённом моторе. Заглушите двигатель, зажигание оставьте включённым, и нажмите «Стереть».</div>';
+function refuseTxt(x) {
+  if (!x) return '';
+  if (x.nrc === 0x22) return 'блок отказал: условия не выполнены — обычно нужно заглушить двигатель (зажигание включено)';
+  if (x.nrc === 0x33) return 'блок требует защищённый доступ — стереть можно только дилерским оборудованием';
+  if (x.nrc === 0x78) return 'блок долго обрабатывал команду';
+  if (x.nrc != null) return 'блок отказал: ' + (NRC[x.nrc] || ('код 0x' + hex2(x.nrc)));
+  return x.err ? 'нет ответа (' + x.err + ')' : '';
+}
+// Отчёт: что стёрлось, что вернулось сразу (активная неисправность), что стереть нельзя (постоянные)
+function clearReport(res, udsOnly) {
+  const accepted = (res.obd && res.obd.ok !== false) || (res.uds && res.uds.ok) || (res.r && res.r.ok);
+  const left = [];
+  if (!udsOnly && res.after) { (res.after.stored || []).forEach(c => left.push({ c, k: 'stored' })); (res.after.pending || []).forEach(c => left.push({ c, k: 'pending' })); (res.after.perm || []).forEach(c => left.push({ c, k: 'perm' })); }
+  (res.udsAfter || res.after && Array.isArray(res.after) && res.after || []).forEach(x => { if (!left.some(l => l.c === x.code)) left.push({ c: x.code, k: (x.status & 1) ? 'active' : 'stored' }); });
+  let h = '';
+  if (!accepted) h += `<div class="warnbox"><b>Ошибки не стёрты:</b> ${esc(refuseTxt(res.obd || res.r) || refuseTxt(res.uds) || 'блок не подтвердил команду')}.${running() ? ' Двигатель сейчас работает — заглушите его и повторите.' : ''}</div>`;
+  else if (!left.length) h += '<div class="okbox">Ошибки стёрты. Копия кодов сохранена в «Резервных копиях».</div>';
+  else {
+    h += '<div class="warnbox"><b>Команда стирания принята, но часть кодов осталась:</b><ul class="clean">';
+    left.forEach(l => {
+      const why = l.k === 'perm' ? 'постоянный код: никаким сканером не стирается, уйдёт сам после успешной самопроверки системы'
+        : l.k === 'active' ? 'неисправность есть прямо сейчас — код сразу записался снова; сотрётся только после устранения причины'
+        : 'код вернулся сразу после стирания — значит, условие неисправности выполняется прямо сейчас';
+      h += `<li><b class="mono">${esc(l.c)}</b> — ${esc(why)}</li>`;
+    });
+    h += '</ul></div>';
+  }
+  return h;
+}
 $('#btnDtcClear').onclick = async () => {
-  const ok = await ask('Стереть ошибки двигателя?', 'Перед стиранием приложение сохранит список кодов и стоп-кадр в резервную копию.<div class="warnbox">Стирание сбрасывает готовность систем самодиагностики. Если причина не устранена, ошибка вернётся. Зажигание включено, двигатель лучше заглушить.</div>', 'Стереть');
+  const ok = await ask('Стереть ошибки двигателя?', (running() ? ENGINE_OFF_TXT : '') + 'Будут стёрты коды стандартного OBD и коды производителя в памяти блока двигателя. Перед стиранием приложение сохранит список кодов и стоп-кадр в резервную копию.<div class="hint">Стирание сбрасывает готовность систем самодиагностики. Если причина не устранена, ошибка вернётся.</div>', 'Стереть');
   if (!ok) return;
-  await snapshotBeforeClear('ошибки OBD двигателя');
+  $('#dtcList').innerHTML = '<div class="hint">Стираю… (до 15 с)</div>';
+  await snapshotBeforeClear('ошибки двигателя', mon.modules ? mon.modules.filter(m => m.addr === '01') : []);
   const r = await mon.clearDtcs();
-  $('#dtcList').insertAdjacentHTML('afterbegin', r ? '<div class="okbox">Команда стирания выполнена. Копия сохранена.</div>' : '<div class="warnbox">Блок не подтвердил стирание (часто требует заглушить двигатель).</div>');
+  $('#dtcList').insertAdjacentHTML('afterbegin', clearReport(r));
 };
 
 // --- автоскан ---
@@ -1554,13 +1740,15 @@ function renderModules(list) {
   $('#modList').innerHTML = `<div class="hint">Ответили ${found.length} из ${list.length} блоков.</div>` + found.map(modHtml).join('') + list.filter(m => !m.present).map(modHtml).join('');
   $('#modList').querySelectorAll('[data-clr]').forEach(b => b.onclick = async () => {
     const m = MODULES.find(x => x.addr === b.dataset.clr); const cur = mon.modules.find(x => x.addr === m.addr);
-    const ok = await ask('Стереть ошибки блока ' + m.addr + '?', `${esc(m.name)}. Перед стиранием список ошибок и идентификация блока будут сохранены в резервную копию.` + (m.addr === '15' ? '<div class="warnbox">Блок подушек безопасности: если неисправность не устранена, лампа загорится снова. Не отсоединяйте разъёмы подушек при включённом зажигании.</div>' : ''), 'Стереть');
+    const ok = await ask('Стереть ошибки блока ' + m.addr + '?', (running() ? ENGINE_OFF_TXT : '') + `${esc(m.name)}. Перед стиранием список ошибок и идентификация блока будут сохранены в резервную копию.` + (m.addr === '15' ? '<div class="warnbox">Блок подушек безопасности: если неисправность не устранена, лампа загорится снова. Не отсоединяйте разъёмы подушек при включённом зажигании.</div>' : ''), 'Стереть');
     if (!ok) return;
     await snapshotBeforeClear('ошибки блока ' + m.addr, cur ? [cur] : []);
+    $('#scanMsg').textContent = `Блок ${m.addr}: стираю…`;
     const r = await mon.clearModule(m);
-    if (cur) { cur.dtc = r.after; }
+    if (cur && r.after) { cur.dtc = r.after; }
     renderModules(mon.modules);
-    $('#scanMsg').textContent = r.r.ok ? `Блок ${m.addr}: ошибки стёрты, копия сохранена.` : `Блок ${m.addr} отказал: ${r.r.nrc != null ? (NRC[r.r.nrc] || r.r.nrc) : (r.r.err || '')}`;
+    $('#scanMsg').textContent = '';
+    $('#modList').insertAdjacentHTML('afterbegin', `<div class="small"><b>Блок ${esc(m.addr)}:</b></div>` + clearReport(r, true));
   });
 }
 function prog(barSel, msgSel) { return (f, msg) => { $(barSel).style.display = ''; $(barSel + ' i').style.width = Math.round(f * 100) + '%'; if (msg) $(msgSel).textContent = msg; }; }
@@ -1615,7 +1803,7 @@ renderBackups();
 function renderAnalysis() {
   window._anaT = realClock();
   if (!mon || !mon.samples.length) { $('#anaList').innerHTML = '<div class="card muted">Подключитесь и проедьте 20–30 минут, чтобы получить выводы.</div>'; $('#anaSummary').style.display = 'none'; return; }
-  const F = analyze(mon.samples, { cfg, supported: mon.obd.supported, dtc: mon.dtc, engineUds: mon.engineUds, trip: mon.trip, coast: mon.coast });
+  const F = analyze(mon.samples, { cfg, supported: mon.obd.supported, dtc: mon.dtc, engineUds: mon.engineUds, trip: mon.trip, coast: mon.coast, profile: mon.profile });
   const nb = F.filter(f => f.level === 'bad').length, nw = F.filter(f => f.level === 'warn').length;
   $('#anaSummary').style.display = '';
   $('#anaSummary').innerHTML = `<b>${nb ? 'Найдены вероятные причины: ' + nb : 'Явных неисправностей пока не найдено'}</b>${nw ? ' · замечаний: ' + nw : ''}<div class="hint">Выводы обновляются по ходу поездки. Записано ${Math.round(mon.trip.time / 60)} мин, ${fmt(mon.trip.dist, 1)} км.${isDemo ? ' ДЕМО-данные.' : ''}</div>`;
