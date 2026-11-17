@@ -161,6 +161,17 @@ canvas{width:100%;height:220px;display:block;background:#0a0c0f;border-radius:10
 <!-- ===================== ДАТЧИКИ ===================== -->
 <section class="tab" id="tab-live">
   <h2>Датчики</h2>
+  <div class="card">
+    <div class="row" style="justify-content:space-between">
+      <h3 style="margin:0">Режим вождения</h3>
+      <div class="seg" id="modeSeg"><button data-m="eco">Эконом</button><button data-m="std">Стандарт</button><button data-m="sport">Спорт</button></div>
+    </div>
+    <div class="hint">Подсказчик водителю: машина не перекодируется. В «Экономе» — подсказки для минимального расхода, в «Спорте» — для лучшей динамики. Телефон держите в держателе, не в руке.</div>
+    <div id="coachHint" class="big" style="font-size:22px;line-height:1.25;margin-top:10px;min-height:56px">—</div>
+    <div class="bar" style="height:14px;position:relative;margin-top:8px" id="rpmBar"><i id="rpmFill"></i><b id="bandZone" style="position:absolute;top:0;bottom:0;background:rgba(62,207,142,.25);border-left:2px solid var(--ok);border-right:2px solid var(--ok)"></b><b id="upMark" style="position:absolute;top:-3px;bottom:-3px;width:3px;background:var(--warn)"></b></div>
+    <div class="row small muted" style="justify-content:space-between;margin-top:4px"><span id="rpmTxt">— об/мин</span><span id="coachExtra"></span></div>
+    <label class="row small" style="margin-top:8px"><input type="checkbox" id="cfgVibe"> Короткая вибрация при подсказке «переключитесь»</label>
+  </div>
   <div id="liveEmpty" class="card muted">Подключите адаптер или включите демо-режим.</div>
   <div class="grid" id="tiles"></div>
   <div class="card" style="margin-top:12px">
@@ -270,6 +281,13 @@ canvas{width:100%;height:220px;display:block;background:#0a0c0f;border-radius:10
       </div>
       <div id="cmpOut" style="margin-top:8px"></div>
     </details>
+  </div>
+
+  <div class="card">
+    <h3>Скрытые функции VAG</h3>
+    <div class="small muted">Функции, которые у многих автомобилей VAG включаются кодированием блоков. Есть ли конкретная функция на вашей машине, зависит от версии блока и комплектации. Приложение показывает, найден ли нужный блок, но не включает и не выключает функции: это запись в блоки, её делает специалист.</div>
+    <div id="hfList" style="margin-top:8px"></div>
+    <div class="okbox small"><b>Как включить безопасно:</b> 1) здесь «Создать резервную копию»; 2) специалист включает нужные функции; 3) снова создайте копию и откройте «Сравнить две копии» — будет видно, что именно изменили; 4) сохраните файл первой копии: в нём исходные значения для отката.</div>
   </div>
 </section>
 
@@ -912,6 +930,46 @@ class CoastTest {
   }
 }
 
+// ---------- Помощник водителя: режимы Эконом / Стандарт / Спорт (только подсказки, машина не перекодируется) ----------
+const DRIVE_MODES = {
+  eco: { name: 'Эконом', up: { diesel: 1900, petrol: 2400 }, lug: { diesel: 1100, petrol: 1300 }, band: { diesel: [1300, 2200], petrol: [1500, 2600] } },
+  std: { name: 'Стандарт', up: { diesel: 2600, petrol: 3200 }, lug: { diesel: 1050, petrol: 1250 }, band: { diesel: [1400, 2800], petrol: [1600, 3400] } },
+  sport: { name: 'Спорт', up: { diesel: 4000, petrol: 6000 }, lug: { diesel: 1600, petrol: 2500 }, band: { diesel: [1750, 3500], petrol: [3000, 5800] } }
+};
+class DriveCoach {
+  constructor(mode) { this.mode = DRIVE_MODES[mode] ? mode : 'std'; this.reset(); }
+  reset() { this.t = 0; this.pen = { rev: 0, hard: 0, idle: 0, lug: 0 }; this.coast = 0; this.idleRun = 0; this.last = null; this.peakKw = 0; }
+  feed(s, prof) {
+    const fuel = prof && prof.fuel === 'petrol' ? 'petrol' : 'diesel'; const M = DRIVE_MODES[this.mode];
+    const dt = this.last ? Math.max(0, Math.min(5, (s.t - this.last.t) / 1000)) : 0; this.last = s;
+    const out = { hint: null, lvl: 'info', band: M.band[fuel], up: M.up[fuel], kw: null };
+    if (s.rpm == null || s.rpm < 300) { out.hint = 'Двигатель заглушен'; return out; }
+    this.t += dt; const spd = s.spd || 0, load = s.load || 0, rpm = s.rpm, pedal = s.pedal != null ? s.pedal : load;
+    if (load > 0 && fuel === 'diesel') { out.kw = maxTorque(rpm, prof) * load / 100 * rpm * 2 * Math.PI / 60 / 1000; this.peakKw = Math.max(this.peakKw, out.kw); }
+    if (spd < 1) {
+      this.idleRun += dt;
+      if (this.mode !== 'sport' && this.idleRun > 60) { out.hint = `На холостом ${Math.floor(this.idleRun / 60)} мин. Если стоянка дольше пары минут — заглушите двигатель. Прогрев на месте не нужен: трогайтесь плавно.`; out.lvl = 'warn'; this.pen.idle += dt; }
+      else out.hint = 'Стоим';
+      return out;
+    }
+    this.idleRun = 0;
+    if (rpm < M.lug[fuel] && load > 80 && spd > 10) { out.hint = 'Понизьте передачу: мотор тянет на слишком низких оборотах'; out.lvl = 'warn'; this.pen.lug += dt; }
+    else if (this.mode === 'sport') {
+      if (rpm >= M.up[fuel]) { out.hint = 'Переключайтесь выше — пик мощности пройден'; out.lvl = 'go'; }
+      else if (load > 85 && rpm < M.band[fuel][0]) { out.hint = 'Для разгона мало оборотов — понизьте передачу'; out.lvl = 'warn'; }
+      else if (load > 85) { out.hint = 'Хорошо: зона максимальной тяги'; out.lvl = 'good'; }
+      else out.hint = `Зона тяги: ${M.band[fuel][0]}–${M.band[fuel][1]} об/мин`;
+    }
+    else if (rpm >= M.up[fuel] && load < 85 && spd > 15) { out.hint = 'Переключитесь на передачу выше'; out.lvl = 'go'; this.pen.rev += dt; }
+    else if (this.mode === 'eco' && pedal > 75 && spd > 5) { out.hint = 'Плавнее газ: резкий разгон тратит больше топлива'; out.lvl = 'warn'; this.pen.hard += dt; }
+    else if (this.mode === 'eco' && spd > 110) { out.hint = 'Выше 110 км/ч расход быстро растёт'; out.lvl = 'warn'; }
+    else if (load < 2 && rpm > 1100) { out.hint = 'Торможение двигателем: топливо не тратится'; out.lvl = 'good'; this.coast += dt; }
+    else out.hint = this.mode === 'eco' ? 'Хорошо: экономичный режим' : 'Обычная езда';
+    return out;
+  }
+  score() { if (this.t < 30) return null; const p = (this.pen.rev + this.pen.hard * 1.5 + this.pen.idle * 0.5 + this.pen.lug) / this.t; return Math.max(0, Math.round(100 - p * 200)); }
+}
+
 // ---------- Анализ причин высокого расхода ----------
 function sumDt(S, pred) { let t = 0; for (let i = 1; i < S.length; i++) { if (pred(S[i], i)) t += Math.min(5, (S[i].t - S[i - 1].t) / 1000); } return t; }
 function analyze(S, ctx) {
@@ -1502,7 +1560,8 @@ async function startWith(transport) {
   mon.on('info', renderInfo);
   mon.on('status', renderStatus);
   mon.on('dtc', renderDtc);
-  mon.on('modules', renderModules);
+  mon.on('modules', l => { renderModules(l); renderHidden(); });
+  mon.on('sample', coachFeed);
   mon.on('profile', p => { renderProfile(p); if (mon.obd) buildTiles(); });
   mon.on('scanprog', ({ f, m }) => prog('#scanBar', '#scanMsg')(f, m));
   mon.on('sample', onSample);
@@ -1587,7 +1646,7 @@ function onSample(s) {
   const tr = mon.trip;
   $('#tAvg').textContent = fmt(tr.l100, 1); $('#tFuel').textContent = fmt(tr.fuel, 2); $('#tDist').textContent = fmt(tr.dist, 1);
   $('#tTime').textContent = Math.floor(tr.time / 60) + ' мин'; $('#tIdle').textContent = tr.time ? Math.round(tr.idle / tr.time * 100) + '%' : '—'; $('#tCold').textContent = tr.time ? Math.round(tr.cold / tr.time * 100) + '%' : '—';
-  if ($('#tab-live').classList.contains('act')) drawChart();
+  if ($('#tab-live').classList.contains('act')) { drawChart(); renderCoach(); }
   if ($('#tab-ana').classList.contains('act') && now - (window._anaT || 0) > 4000) renderAnalysis();
   updateTests();
 }
@@ -1617,7 +1676,7 @@ function drawChart() {
 ['#chA', '#chB', '#chWin'].forEach(s => $(s).onchange = drawChart);
 
 // --- поездка, CSV ---
-$('#btnTripReset').onclick = () => { if (mon) { mon.trip.reset(); onSample(mon.samples[mon.samples.length - 1] || {}); } };
+$('#btnTripReset').onclick = () => { coach.reset(); if (mon) { mon.trip.reset(); onSample(mon.samples[mon.samples.length - 1] || {}); } };
 function csv() {
   if (!mon || !mon.samples.length) return '';
   const cols = ['t', 'rpm', 'spd', 'load', 'maf', 'map', 'baro', 'iat', 'ect', 'amb', 'egrCmd', 'egrErr', 'rail', 'dpfT', 'dpfDp', 'egt', 'bCmd', 'bAct', 'lam', 'lh', 'meth'];
@@ -1809,6 +1868,52 @@ function renderAnalysis() {
   $('#anaSummary').innerHTML = `<b>${nb ? 'Найдены вероятные причины: ' + nb : 'Явных неисправностей пока не найдено'}</b>${nw ? ' · замечаний: ' + nw : ''}<div class="hint">Выводы обновляются по ходу поездки. Записано ${Math.round(mon.trip.time / 60)} мин, ${fmt(mon.trip.dist, 1)} км.${isDemo ? ' ДЕМО-данные.' : ''}</div>`;
   $('#anaList').innerHTML = F.map(f => `<div class="find ${f.level}"><h4>${esc(f.title)}</h4><p>${esc(f.text)}</p></div>`).join('');
 }
+
+// --- скрытые функции VAG: справочник (без записи в блоки) ---
+const HIDDEN = [
+  { n: 'Стрелки приборов при включении зажигания', d: 'Стрелки пробегают до упора и обратно.', m: '17', note: '' },
+  { n: 'Число миганий «комфортного» поворотника', d: 'Сколько раз мигает поворотник при коротком касании рычага.', m: '09', note: '' },
+  { n: 'Подтверждение закрытия и открытия миганием', d: 'Аварийка мигает при запирании и отпирании с ключа.', m: '09', note: '' },
+  { n: 'Coming home / Leaving home', d: 'Фары подсвечивают дорогу после выхода из машины и при отпирании.', m: '09', note: 'Доступно только при подходящей комплектации освещения.' },
+  { n: 'Аварийка при резком торможении', d: 'Аварийные огни включаются автоматически при экстренном торможении.', m: '09', note: 'Перед включением проверьте, допускают ли это правила вашей страны.' },
+  { n: 'Комфортное закрытие окон с ключа', d: 'Удержание кнопки на ключе закрывает или открывает все стёкла.', m: '09', note: 'Нужны стеклоподъёмники с поддержкой этой функции.' },
+  { n: 'Ходовые огни: режим и яркость', d: 'Настройка дневных ходовых огней.', m: '09', note: 'Изменение светотехники может противоречить требованиям к транспортным средствам — уточняйте перед включением.' }
+];
+function renderHidden() {
+  const mods = mon && mon.modules;
+  $('#hfList').innerHTML = HIDDEN.map(h => {
+    const m = mods ? mods.find(x => x.addr === h.m) : null;
+    const tag = !mods ? '<span class="tag">блоки не опрошены</span>' : m && m.present ? `<span class="tag g">блок ${h.m} найден</span>` : `<span class="tag y">блок ${h.m} не ответил</span>`;
+    return `<div class="dtc"><b style="font-family:inherit">${esc(h.n)}</b>${tag}<div class="small">${esc(h.d)}${h.note ? ' <span class="muted">' + esc(h.note) + '</span>' : ''}</div></div>`;
+  }).join('');
+}
+renderHidden();
+
+// --- помощник водителя: Эконом / Стандарт / Спорт ---
+const coach = new DriveCoach(cfg.driveMode || 'std'); let coachOut = null, lastVibe = 0;
+function coachFeed(s) {
+  coachOut = coach.feed(s, mon && mon.profile);
+  if (cfg.vibe && coachOut.lvl === 'go' && navigator.vibrate && realClock() - lastVibe > 5000) { lastVibe = realClock(); try { navigator.vibrate(80); } catch (e) { } }
+}
+function renderCoach() {
+  const o = coachOut; const col = { go: 'var(--warn)', warn: 'var(--bad)', good: 'var(--ok)', info: 'var(--tx)' };
+  if (!o || !mon) { $('#coachHint').textContent = 'Подключите адаптер или включите демо-режим'; $('#coachHint').style.color = 'var(--mut)'; return; }
+  $('#coachHint').textContent = o.hint || '—'; $('#coachHint').style.color = col[o.lvl] || 'var(--tx)';
+  const max = mon.profile && mon.profile.fuel === 'petrol' ? 7000 : 5000, rpm = mon.v.rpm || 0;
+  $('#rpmFill').style.width = Math.min(100, rpm / max * 100) + '%';
+  $('#bandZone').style.left = (o.band[0] / max * 100) + '%'; $('#bandZone').style.width = ((o.band[1] - o.band[0]) / max * 100) + '%';
+  $('#upMark').style.left = Math.min(99, o.up / max * 100) + '%';
+  $('#rpmTxt').textContent = fmt(rpm) + ' об/мин · переключение ~' + o.up;
+  const sc = coach.score();
+  $('#coachExtra').textContent = coach.mode === 'sport' ? (o.kw != null ? `≈ ${fmt(o.kw)} кВт (оценка) · пик ${fmt(coach.peakKw)}` : '') : (sc != null ? `Оценка поездки: ${sc}/100` : '');
+}
+function setMode(m) {
+  coach.mode = DRIVE_MODES[m] ? m : 'std'; coach.reset(); cfg.driveMode = coach.mode; store.set('cfg', cfg);
+  document.querySelectorAll('#modeSeg button').forEach(b => b.classList.toggle('act', b.dataset.m === coach.mode)); renderCoach();
+}
+document.querySelectorAll('#modeSeg button').forEach(b => b.onclick = () => setMode(b.dataset.m));
+$('#cfgVibe').checked = !!cfg.vibe; $('#cfgVibe').onchange = e => { cfg.vibe = e.target.checked; store.set('cfg', cfg); };
+setMode(cfg.driveMode || 'std');
 
 // --- тесты ---
 let curCoast = null, curAcc = null;
