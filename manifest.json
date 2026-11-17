@@ -1,0 +1,17 @@
+{
+  "name": "Rapid 1.6 TDI — диагностика",
+  "short_name": "Rapid OBD",
+  "description": "OBD/UDS-диагностика Škoda Rapid 1.6 TDI через адаптер ELM327 BLE: ошибки, датчики, расход, резервная копия блоков.",
+  "lang": "ru",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0e1114",
+  "theme_color": "#0e1114",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
